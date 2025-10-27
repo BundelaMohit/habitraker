@@ -2,6 +2,10 @@
 
 Habitraker is a full-featured, real-time web application designed for tracking daily habits, building streaks, and running collaborative group challenges. It helps you stay accountable to your personal goals and compete alongside your friends. Built with plain HTML, Tailwind CSS, and powered by Google Firestore for persistent, real-time data storage.
 
+🌟 Live Demo
+
+See Habitraker Live Here (Insert Your Netlify URL)
+
 ✨ Core Features
 
 Real-Time Tracking: Track and update daily activities instantly. All data saves permanently to Google Firestore.
@@ -34,6 +38,12 @@ Authentication: Firebase Auth (Anonymous/Custom Token)
 
 This application requires a live web environment to securely handle user authentication and database connections. Opening the file locally (via file:///) will cause connection errors.
 
+Quick Start
+
+Clone this repository.
+
+Open the index.html file in your preferred browser. (Note: Data saving will not work until deployed to a server)
+
 Deploying to Netlify (Recommended)
 
 Save the latest code as a single file named index.html.
@@ -43,10 +53,6 @@ Go to Netlify and log in.
 In your dashboard, use the drag-and-drop feature to upload your index.html file.
 
 Once deployed, change the site name (e.g., to habitraker-app) under Site settings to get a clean URL (e.g., https://habitraker-app.netlify.app).
-
-Project Structure
-
-Since this is a Single-File App (SFA), all CSS, HTML structure, and JavaScript logic reside within index.html.
 
 🤝 Contribution
 
