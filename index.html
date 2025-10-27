@@ -11,21 +11,39 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // IMPORTANT: We use window scope for global access in the main script block
         window.firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // FIXED: Changed __appId to __app_id
         window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        window.app = initializeApp(window.firebaseConfig);
-        window.db = getFirestore(window.app);
-        window.auth = getAuth(window.app);
-        
-        // Exporting key Firestore functions globally for use in the main script block
-        window.firestore = {
-            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc
-        };
+        // --- RESILIENT INITIALIZATION ---
+        try {
+            if (window.firebaseConfig.projectId && window.firebaseConfig.apiKey) {
+                window.app = initializeApp(window.firebaseConfig);
+                window.db = getFirestore(window.app);
+                window.auth = getAuth(window.app);
+                
+                // Exporting key Firestore functions globally for use in the main script block
+                window.firestore = {
+                    getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc, deleteField
+                };
+            } else {
+                // If config is missing (as on GitHub Pages), prevent app crash
+                console.warn("FIREBASE CONFIGURATION MISSING (Expected on GitHub Pages). App will run in Offline/Display Mode.");
+                window.app = null;
+                window.db = null;
+                window.auth = null;
+                window.firestore = null; 
+            }
+        } catch (e) {
+            console.error("Firebase initialization failed:", e);
+            window.app = null;
+            window.db = null;
+            window.auth = null;
+            window.firestore = null; 
+        }
     </script>
 
     <!-- Load Inter font --><link rel="preconnect" href="https://fonts.googleapis.com">
@@ -71,9 +89,76 @@
         
         /* New Styles for Dynamic Habits UI */
         .loading-overlay { @apply absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-70 z-20 rounded-xl; }
+        
+        .challenge-btn {
+            @apply flex items-center justify-center py-2 px-3 rounded-lg font-semibold transition-colors w-full;
+        }
+        .challenge-btn.solo {
+            @apply bg-orange-600 text-white hover:bg-orange-500;
+        }
+        .challenge-btn.group {
+            @apply bg-green-600 text-white hover:bg-green-500;
+        }
+        /* Modal Styles */
+        .modal {
+            @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 transition-opacity duration-300;
+        }
+        .modal-content {
+            @apply bg-neutral-900 p-6 rounded-xl shadow-2xl w-full max-w-md border border-neutral-700;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
+
+    <!-- Challenge Modal (Hidden by default) -->
+    <div id="challenge-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="modal-title" class="text-xl font-bold text-white mb-4">Start New Challenge</h3>
+            
+            <div class="space-y-4">
+                
+                <!-- Habit Selection -->
+                <div>
+                    <label class="block text-sm font-medium text-neutral-400 mb-1">Select Habit to Track</label>
+                    <select id="challenge-habit-select" class="styled-input w-full"></select>
+                </div>
+
+                <!-- Goal Target -->
+                <div>
+                    <label class="block text-sm font-medium text-neutral-400 mb-1">Total Target Goal</label>
+                    <div class="flex space-x-2">
+                        <input id="challenge-target-input" type="number" step="1" min="1" value="1" class="styled-input w-24 text-center">
+                        <span id="challenge-unit-display" class="text-neutral-300 flex items-center">times (checkbox)</span>
+                    </div>
+                </div>
+
+                <!-- Duration -->
+                <div>
+                    <label class="block text-sm font-medium text-neutral-400 mb-1">Duration</label>
+                    <select id="challenge-duration-select" class="styled-input w-full">
+                        <option value="1">1 Week</option>
+                        <option value="2">2 Weeks</option>
+                        <option value="3">3 Weeks</option>
+                        <option value="4">4 Weeks</option>
+                    </select>
+                </div>
+
+            </div>
+
+            <!-- Modal Action Buttons -->
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="modal-cancel-btn" class="bg-neutral-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-neutral-500 transition-colors">
+                    Cancel
+                </button>
+                <button id="modal-start-btn" class="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold hover:bg-amber-400 transition-colors">
+                    Start Challenge
+                </button>
+            </div>
+
+            <p id="modal-error-message" class="text-red-400 text-sm mt-3 text-center min-h-[1.5rem]"></p>
+        </div>
+    </div>
+    <!-- End Challenge Modal -->
 
     <!-- Main Grid Container -->
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
@@ -118,7 +203,7 @@
                 <p class="text-xs text-neutral-500 mt-2">User ID: <span id="user-id">Loading...</span></p>
             </div>
             
-            <img src="image_e328a4.png" 
+            <img src="https://placehold.co/80x80/111/555?text=Rabbit" 
                 alt="Rabbit" 
                 class="w-20 h-20 rounded-xl object-cover shadow-lg border-2 border-neutral-700"
                 onerror="this.src='https://placehold.co/80x80/111/555?text=Rabbit'; this.onerror=null;">
@@ -131,6 +216,75 @@
                 <h2 id="streak-value" class="text-5xl font-extrabold text-white mt-2">0</h2> 
                 <p class="text-neutral-400 font-medium">Day Streak</p>
             </div>
+            
+            <!-- Group & Collaboration Panel --><div class="panel">
+                <h3 class="text-lg font-bold text-white mb-4">Group & Collaboration</h3>
+                
+                <!-- Group Status -->
+                <div class="flex justify-between items-center mb-4 p-2 bg-neutral-900 rounded-lg border border-neutral-700">
+                    <div>
+                        <span class="text-sm font-medium text-neutral-400">Group Status:</span>
+                        <span id="group-status" class="font-bold text-amber-500 ml-1">Solo</span>
+                    </div>
+                    <div>
+                        <span class="text-sm font-medium text-neutral-400">Members:</span>
+                        <span id="group-members-count" class="font-bold text-white ml-1">1</span>
+                    </div>
+                </div>
+
+                <!-- Join/Create Group Form -->
+                <div id="group-form">
+                    <h4 class="text-sm font-semibold text-neutral-300 mb-2">Manage Group</h4>
+                    <div class="flex space-x-2 mb-2">
+                        <input id="group-id-input" type="text" class="styled-input flex-grow" placeholder="Enter Group ID">
+                        <button id="join-group-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-500 transition-colors flex-shrink-0">
+                            Join
+                        </button>
+                    </div>
+                    <button id="create-group-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-500 transition-colors w-full">
+                        Create New Group
+                    </button>
+                    <p id="group-message" class="text-xs text-neutral-400 mt-2 min-h-[1.5rem]"></p>
+                </div>
+
+                <!-- Challenge Buttons -->
+                <div class="mt-4 space-y-2">
+                    <button id="solo-challenge-btn" class="challenge-btn solo">
+                        Start Solo Challenge
+                    </button>
+                    <button id="group-challenge-btn" class="challenge-btn group" disabled>
+                        Start Group Challenge
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Active Challenge Panel (NEWLY ADDED HTML) -->
+            <div id="active-challenge-panel" class="panel hidden">
+                <h3 class="text-lg font-bold text-white mb-4 flex justify-between items-center">
+                    Active Challenge
+                    <button id="challenge-complete-btn" class="text-green-500 text-xs font-semibold hover:text-green-400">
+                         Complete & End
+                    </button>
+                </h3>
+                
+                <div id="challenge-status-content" class="space-y-3">
+                    <p class="text-neutral-300 font-medium" id="challenge-name-display">Loading...</p>
+
+                    <!-- Progress Bar -->
+                    <div>
+                        <div class="flex justify-between text-sm font-semibold mb-1">
+                            <span id="challenge-progress-value" class="text-amber-400">0%</span>
+                            <span id="challenge-goal-display" class="text-white">0 / 0</span>
+                        </div>
+                        <div class="stat-bar-bg">
+                            <div id="challenge-progress-bar" class="stat-bar-fill bg-amber-500" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    
+                    <p class="text-xs text-neutral-400" id="challenge-time-remaining">Ends in X weeks.</p>
+                </div>
+            </div>
+            <!-- END Active Challenge Panel -->
             
             <!-- Daily Average Panel --><div class="panel">
                 <h3 class="text-lg font-bold text-white mb-4">Daily Averages</h3>
@@ -238,6 +392,7 @@
         const USER_GROUP_DOC_ID = 'groupMembership';
         const USER_GROUP_COLLECTION = 'metadata';
         const GROUPS_COLLECTION = 'groups'; 
+        const CHALLENGES_COLLECTION = 'challenges'; // New collection for public challenges
         
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
         
@@ -253,11 +408,17 @@
         let userId = null;
         let isAuthReady = false;
 
+        // Group State
         let groupId = null;
         let groupMembers = {};
         let groupListener = null;
 
-        // --- Element References ---
+        // Challenge State
+        let activeChallenge = null; // {id, type, habitId, target, durationWeeks, participants: {userId: {progress: 0, ...}}}
+        let challengeListener = null;
+
+
+        // --- 2. Element References ---
         const monthYearTitle = document.getElementById('month-year-title');
         const calendarGrid = document.getElementById('calendar-grid');
         const habitsList = document.getElementById('habits-list');
@@ -271,6 +432,39 @@
         const newHabitTypeSelect = document.getElementById('new-habit-type');
         const addHabitBtn = document.getElementById('add-habit-btn');
         
+        // --- Group References ---
+        const groupStatusSpan = document.getElementById('group-status');
+        const groupMembersCountSpan = document.getElementById('group-members-count');
+        const groupIdInput = document.getElementById('group-id-input');
+        const joinGroupBtn = document.getElementById('join-group-btn');
+        const createGroupBtn = document.getElementById('create-group-btn');
+        const groupMessage = document.getElementById('group-message');
+        const soloChallengeBtn = document.getElementById('solo-challenge-btn');
+        const groupChallengeBtn = document.getElementById('group-challenge-btn');
+        
+        // --- Challenge Display References (NEW) ---
+        const activeChallengePanel = document.getElementById('active-challenge-panel');
+        const challengeNameDisplay = document.getElementById('challenge-name-display');
+        const challengeProgressValue = document.getElementById('challenge-progress-value');
+        const challengeGoalDisplay = document.getElementById('challenge-goal-display');
+        const challengeProgressBar = document.getElementById('challenge-progress-bar');
+        const challengeTimeRemaining = document.getElementById('challenge-time-remaining');
+        const challengeCompleteBtn = document.getElementById('challenge-complete-btn'); // Defined here
+        
+
+        // --- Modal References (NEW) ---
+        const challengeModal = document.getElementById('challenge-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const challengeHabitSelect = document.getElementById('challenge-habit-select');
+        const challengeTargetInput = document.getElementById('challenge-target-input');
+        const challengeUnitDisplay = document.getElementById('challenge-unit-display');
+        const challengeDurationSelect = document.getElementById('challenge-duration-select');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+        const modalStartBtn = document.getElementById('modal-start-btn');
+        const modalErrorMessage = document.getElementById('modal-error-message');
+
+
+        // --- Tooltip references ---
         const tooltipTodayScore = document.getElementById('tooltip-today-score');
         const tooltipMonthlyScore = document.getElementById('tooltip-monthly-score');
         const statsCompleted = document.getElementById('stats-completed');
@@ -282,13 +476,15 @@
         function getDateKey(date) {
             const year = date.getFullYear();
             const month = (date.getMonth() + 1).toString().padStart(2, '0');
-            // Corrected the duplicate getDate() call here
-            const day = date.getDate().toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0'); 
             return `${year}-${month}-${day}`;
         }
         function getHabitColor(index) {
             const colors = ['#f97316', '#16a34a', '#2563eb', '#7c3aed', '#14b8a6', '#f59e0b', '#dc2626', '#3b82f6'];
             return colors[index % colors.length];
+        }
+        function generateRandomId() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
         }
         
         // --- 4. Firestore Path Functions ---
@@ -309,6 +505,14 @@
             return firestoreFunctions.doc(db, 'artifacts', appId, 'users', userId, HABIT_DEFINITIONS_COLLECTION, HABIT_DEFINITIONS_DOC_ID);
         }
 
+        function getUserGroupMetadataPath() {
+             if (!userId) {
+                console.error("User ID is not set.");
+                return null;
+            }
+            return firestoreFunctions.doc(db, 'artifacts', appId, 'users', userId, USER_GROUP_COLLECTION, USER_GROUP_DOC_ID);
+        }
+
         function getGroupPath(gId) {
             if (!gId) {
                 console.error("Group ID is missing.");
@@ -316,35 +520,454 @@
             }
             return firestoreFunctions.doc(db, 'artifacts', appId, 'public', 'data', GROUPS_COLLECTION, gId);
         }
+        
+        function getChallengePath(cId) {
+            if (!cId) {
+                console.error("Challenge ID is missing.");
+                return null;
+            }
+            return firestoreFunctions.doc(db, 'artifacts', appId, 'public', 'data', CHALLENGES_COLLECTION, cId);
+        }
+
+        // --- 5. Group Management Logic ---
+
+        function setupGroupMetadataListener() {
+            if (!userId || !firestoreFunctions) return;
+
+            const docRef = getUserGroupMetadataPath();
+
+            firestoreFunctions.onSnapshot(docRef, (docSnap) => {
+                const data = docSnap.data();
+                const newGroupId = data?.groupId || null;
+                const newChallengeId = data?.activeChallengeId || null;
+                
+                // 1. Handle Group Change
+                if (newGroupId !== groupId) {
+                    groupId = newGroupId;
+                    
+                    if (groupListener) groupListener(); 
+
+                    if (groupId) {
+                        setupPublicGroupDetailsListener(groupId);
+                    } else {
+                        groupStatusSpan.textContent = 'Solo';
+                        groupStatusSpan.classList.add('text-amber-500');
+                        groupStatusSpan.classList.remove('text-green-500');
+                        groupMembersCountSpan.textContent = '1';
+                        groupChallengeBtn.disabled = true;
+                    }
+                }
+                
+                // 2. Handle Challenge Change
+                if (newChallengeId !== (activeChallenge ? activeChallenge.id : null)) {
+                    if (challengeListener) challengeListener();
+                    if (newChallengeId) {
+                        setupActiveChallengeListener(newChallengeId);
+                    } else {
+                        activeChallenge = null;
+                        renderActiveChallengeUI(); // Hide panel
+                    }
+                }
+                
+                renderGroupUI();
+            }, (error) => {
+                console.error("Error listening to group metadata:", error);
+            });
+        }
+        
+        function setupPublicGroupDetailsListener(gId) {
+            const docRef = getGroupPath(gId);
+            
+            groupListener = firestoreFunctions.onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists() && docSnap.data().members) {
+                    groupMembers = docSnap.data().members;
+                    const count = Object.keys(groupMembers).length;
+                    groupMembersCountSpan.textContent = count.toString();
+                } else {
+                    leaveGroup(false); 
+                }
+                renderGroupUI();
+            }, (error) => {
+                console.error("Error listening to public group details:", error);
+            });
+        }
+        
+        async function createGroup() {
+            if (!userId || !firestoreFunctions) { groupMessage.textContent = "Database not connected."; return; }
+            if (groupId) { groupMessage.textContent = "You must leave your current group first."; return; }
+
+            const newGroupId = generateRandomId();
+            const groupDocRef = getGroupPath(newGroupId);
+
+            try {
+                await firestoreFunctions.setDoc(groupDocRef, {
+                    creatorId: userId,
+                    createdAt: new Date().toISOString(),
+                    members: { [userId]: true }
+                });
+                
+                await firestoreFunctions.setDoc(getUserGroupMetadataPath(), { groupId: newGroupId }, { merge: true });
+                
+                groupMessage.textContent = `Group Created! Share this ID: ${newGroupId}`;
+                groupIdInput.value = newGroupId;
+            } catch (e) {
+                console.error("Error creating group:", e);
+                groupMessage.textContent = "Failed to create group. Try again.";
+            }
+        }
+        
+        async function joinGroup() {
+            if (!userId || !firestoreFunctions) { groupMessage.textContent = "Database not connected."; return; }
+            if (groupId) { groupMessage.textContent = "You are already in a group. Leave first."; return; }
+            const enteredId = groupIdInput.value.trim().toUpperCase();
+            if (enteredId.length !== 6) { groupMessage.textContent = "Invalid Group ID format (must be 6 chars)."; return; }
+
+            const groupDocRef = getGroupPath(enteredId);
+
+            try {
+                const docSnap = await firestoreFunctions.getDoc(groupDocRef);
+                if (!docSnap.exists()) {
+                    groupMessage.textContent = `Group ID "${enteredId}" not found.`;
+                    return;
+                }
+                
+                await firestoreFunctions.updateDoc(groupDocRef, {
+                    [`members.${userId}`]: true
+                });
+
+                await firestoreFunctions.setDoc(getUserGroupMetadataPath(), { groupId: enteredId }, { merge: true });
+                
+                groupMessage.textContent = `Joined group ${enteredId}!`;
+            } catch (e) {
+                console.error("Error joining group:", e);
+                groupMessage.textContent = "Failed to join group. Check the ID and try again.";
+            }
+        }
+
+        async function leaveGroup(shouldDeleteIfLast = true) {
+            if (!userId || !groupId || !firestoreFunctions) return;
+
+            const groupDocRef = getGroupPath(groupId);
+            const currentGroupId = groupId;
+            
+            try {
+                await firestoreFunctions.updateDoc(groupDocRef, {
+                    [`members.${userId}`]: firestoreFunctions.deleteField()
+                });
+
+                const snap = await firestoreFunctions.getDoc(groupDocRef);
+                const memberKeys = Object.keys(snap.data()?.members || {}).filter(id => id !== userId); // Filter out current user locally
+
+                if (shouldDeleteIfLast && memberKeys.length === 0) {
+                    await firestoreFunctions.deleteDoc(groupDocRef);
+                }
+
+                await firestoreFunctions.updateDoc(getUserGroupMetadataPath(), { groupId: firestoreFunctions.deleteField() });
+                
+                groupMessage.textContent = `Left group ${currentGroupId}.`;
+            } catch (e) {
+                 if (e.code === 'not-found') {
+                     await firestoreFunctions.updateDoc(getUserGroupMetadataPath(), { groupId: firestoreFunctions.deleteField() });
+                 } else {
+                     console.error("Error leaving group:", e);
+                     groupMessage.textContent = "Failed to leave group. Check console for details.";
+                 }
+            }
+        }
+
+        function renderGroupUI() {
+            if (groupId) {
+                groupStatusSpan.textContent = `Group: ${groupId}`;
+                groupStatusSpan.classList.add('text-green-500');
+                groupStatusSpan.classList.remove('text-amber-500');
+                createGroupBtn.textContent = 'Leave Group';
+                createGroupBtn.classList.remove('bg-green-600', 'hover:bg-green-500');
+                createGroupBtn.classList.add('bg-red-600', 'hover:bg-red-500');
+                joinGroupBtn.style.display = 'none';
+                groupIdInput.style.display = 'none';
+            } else {
+                groupStatusSpan.textContent = 'Solo';
+                groupStatusSpan.classList.add('text-amber-500');
+                groupStatusSpan.classList.remove('text-green-500');
+                groupMembersCountSpan.textContent = '1';
+                createGroupBtn.textContent = 'Create New Group';
+                createGroupBtn.classList.add('bg-green-600', 'hover:bg-green-500');
+                createGroupBtn.classList.remove('bg-red-600', 'hover:bg-red-500');
+                joinGroupBtn.style.display = 'block';
+                groupIdInput.style.display = 'block';
+            }
+            groupChallengeBtn.disabled = !groupId;
+        }
+
+        // --- 5. Challenge Management Logic ---
+
+        /**
+         * Listens to the active challenge document.
+         */
+        function setupActiveChallengeListener(challengeId) {
+             if (!userId || !firestoreFunctions) return;
+
+             const docRef = getChallengePath(challengeId);
+             
+             challengeListener = firestoreFunctions.onSnapshot(docRef, (docSnap) => {
+                 if (docSnap.exists()) {
+                     activeChallenge = docSnap.data();
+                     // Recalculate progress based on current habit data
+                     updateChallengeProgress(activeChallenge);
+                 } else {
+                     // Challenge was deleted/ended by creator
+                     endChallengeLocally();
+                 }
+                 renderActiveChallengeUI();
+             }, (error) => {
+                 console.error("Error listening to active challenge:", error);
+                 endChallengeLocally();
+             });
+        }
+        
+        /**
+         * Calculates and updates the user's progress for the challenge.
+         */
+        async function updateChallengeProgress(challenge) {
+            if (!userId || !challenge || !firestoreFunctions) return;
+
+            let currentProgress = 0;
+            
+            // Iterate over daily entries within the challenge date range
+            for (const dateKey in habitData) {
+                if (dateKey >= challenge.startDate && dateKey <= challenge.endDate) {
+                    const dailyEntry = habitData[dateKey];
+                    if (dailyEntry && dailyEntry[challenge.habitId] !== undefined) {
+                        const value = dailyEntry[challenge.habitId];
+                        
+                        if (challenge.unit === 'count') {
+                            // Checkbox habit: 1 point per day completed (state 1)
+                            if (value === 1) {
+                                currentProgress += 1;
+                            }
+                        } else {
+                            // Number habit: Accumulate the numerical value
+                            currentProgress += parseFloat(value) || 0;
+                        }
+                    }
+                }
+            }
+
+            // Update progress in Firestore if needed
+            if (challenge.participants[userId] && challenge.participants[userId].progress !== currentProgress) {
+                 const docRef = getChallengePath(challenge.id);
+                 await firestoreFunctions.updateDoc(docRef, {
+                     [`participants.${userId}.progress`]: currentProgress,
+                     [`participants.${userId}.lastUpdated`]: new Date().toISOString()
+                 });
+            }
+        }
+
+        function endChallengeLocally() {
+            activeChallenge = null;
+            if (challengeListener) challengeListener();
+            if (firestoreFunctions) {
+                firestoreFunctions.updateDoc(getUserGroupMetadataPath(), { activeChallengeId: firestoreFunctions.deleteField() });
+            }
+            renderActiveChallengeUI();
+        }
+
+        function renderActiveChallengeUI() {
+            const activeChallengePanel = document.getElementById('active-challenge-panel');
+            if (!activeChallenge) {
+                activeChallengePanel.classList.add('hidden');
+                return;
+            }
+            
+            activeChallengePanel.classList.remove('hidden');
+            const userProgress = activeChallenge.participants[userId]?.progress || 0;
+            const goal = activeChallenge.target;
+            const percentage = Math.min(100, (userProgress / goal) * 100);
+            
+            challengeNameDisplay.textContent = activeChallenge.name;
+            challengeGoalDisplay.textContent = `${userProgress.toFixed(activeChallenge.unit === 'hrs' ? 1 : 0)} / ${goal} ${activeChallenge.unit}`;
+            challengeProgressValue.textContent = `${percentage.toFixed(0)}%`;
+            challengeProgressBar.style.width = `${percentage}%`;
+            
+            // Calculate time remaining
+            const endDate = new Date(activeChallenge.endDate + 'T23:59:59'); // Set to end of day
+            const diffTime = endDate.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            if (diffDays <= 0) {
+                 challengeTimeRemaining.textContent = "Challenge ended.";
+                 // Auto-end if challenge is completed or over
+                 if (diffDays <= 0 || userProgress >= goal) {
+                     challengeCompleteBtn.textContent = 'Challenge Ended (View Result)';
+                     challengeCompleteBtn.onclick = endChallengeLocally; // Ends it on click
+                 }
+            } else if (diffDays <= 7) {
+                 challengeTimeRemaining.textContent = `Ends in ${diffDays} day${diffDays === 1 ? '' : 's'}.`;
+            } else {
+                 const diffWeeks = Math.ceil(diffDays / 7);
+                 challengeTimeRemaining.textContent = `Ends in ${diffWeeks} week${diffWeeks === 1 ? '' : 's'}.`;
+            }
+            
+            challengeCompleteBtn.textContent = userProgress >= goal ? 'Goal Achieved!' : 'End Challenge';
+            challengeCompleteBtn.disabled = userProgress < goal; // Only enable if goal is met
+            
+            if (userProgress >= goal) {
+                 challengeCompleteBtn.textContent = 'Goal Achieved! (Click to End)';
+                 challengeCompleteBtn.classList.remove('bg-red-600');
+                 challengeCompleteBtn.classList.add('bg-green-600');
+            } else {
+                 challengeCompleteBtn.classList.add('bg-red-600');
+                 challengeCompleteBtn.classList.remove('bg-green-600');
+            }
+
+        }
+        
+        // --- Modal Logic ---
+
+        function openChallengeModal(type) {
+            if (!userId || !firestoreFunctions) { alert("Database not connected."); return; }
+
+            if (habitDefinitions.length === 0) {
+                alert("Please add at least one habit first!");
+                return;
+            }
+            if (activeChallenge) {
+                 alert("Please complete or end your current challenge before starting a new one.");
+                 return;
+            }
+
+            modalTitle.textContent = `${type === 'solo' ? 'Start Solo Challenge' : 'Start Group Challenge'}`;
+            challengeModal.dataset.type = type;
+            modalErrorMessage.textContent = '';
+            
+            // Populate habit dropdown
+            challengeHabitSelect.innerHTML = habitDefinitions.map(h => {
+                const name = h.name.replace(/\s\(.*\)/g, '').trim();
+                return `<option value="${h.id}">${name} (${h.type.split('-')[0]})</option>`;
+            }).join('');
+
+            // Set default values and update unit display
+            challengeDurationSelect.value = '1';
+            challengeTargetInput.value = 7;
+            updateChallengeUnitDisplay();
+            
+            challengeModal.classList.remove('hidden');
+        }
+
+        function closeChallengeModal() {
+            challengeModal.classList.add('hidden');
+        }
+
+        function updateChallengeUnitDisplay() {
+            const selectedId = challengeHabitSelect.value;
+            const duration = parseInt(challengeDurationSelect.value);
+            const habit = habitDefinitions.find(h => h.id === selectedId);
+            if (!habit) return;
+
+            let unitText = 'times (count)';
+            if (habit.type.includes('number')) {
+                 unitText = `${habit.unit} total`;
+                 challengeTargetInput.value = (habit.target * duration).toFixed(habit.unit === 'hrs' ? 1 : 0);
+                 challengeTargetInput.step = habit.unit === 'hrs' ? '0.1' : '1';
+            } else {
+                 unitText = 'days completed';
+                 challengeTargetInput.value = 7 * duration; // Default to 7 per week
+                 challengeTargetInput.step = '1';
+            }
+            
+            challengeUnitDisplay.textContent = unitText;
+        }
+        
+        /**
+         * Finalizes challenge creation and saves it to Firestore.
+         */
+        async function createChallengeFinal() {
+            const type = challengeModal.dataset.type;
+            const habitId = challengeHabitSelect.value;
+            const target = parseFloat(challengeTargetInput.value); // Use parseFloat for targets
+            const durationWeeks = parseInt(challengeDurationSelect.value);
+            
+            if (isNaN(target) || target <= 0) {
+                modalErrorMessage.textContent = "Please enter a valid target goal.";
+                return;
+            }
+
+            const challengeId = generateRandomId();
+            const startDate = getDateKey(today);
+            const endDate = new Date(today);
+            endDate.setDate(endDate.getDate() + (durationWeeks * 7) - 1);
+            
+            const habit = habitDefinitions.find(h => h.id === habitId);
+            const habitName = habit.name.replace(/\s\(.*\)/g, '').trim();
+
+            const challengeData = {
+                id: challengeId,
+                type: type, 
+                groupId: type === 'group' ? groupId : null,
+                createdBy: userId,
+                name: `${type === 'group' ? 'Group' : 'Solo'} Challenge: ${habitName}`,
+                habitId: habitId,
+                target: target,
+                unit: habit.unit || 'days',
+                durationWeeks: durationWeeks,
+                startDate: startDate,
+                endDate: getDateKey(endDate),
+                
+                participants: {}
+            };
+
+            if (type === 'group') {
+                 Object.keys(groupMembers).forEach(memberId => {
+                     challengeData.participants[memberId] = { progress: 0, lastUpdated: new Date().toISOString() };
+                 });
+            } else {
+                 challengeData.participants[userId] = { progress: 0, lastUpdated: new Date().toISOString() };
+            }
+
+            try {
+                await firestoreFunctions.setDoc(getChallengePath(challengeId), challengeData);
+                await firestoreFunctions.setDoc(getUserGroupMetadataPath(), { activeChallengeId: challengeId }, { merge: true });
+
+                modalErrorMessage.textContent = `Challenge "${challengeName}" started!`;
+                
+                setTimeout(() => {
+                    closeChallengeModal();
+                }, 1000);
+
+            } catch (e) {
+                console.error("Error starting challenge:", e);
+                modalErrorMessage.textContent = "Failed to start challenge. Check console.";
+            }
+        }
 
 
         // --- 6. Persistence & Core Functions ---
 
         async function saveHabitDefinitions() {
-            if (!userId) return;
+            if (!userId || !firestoreFunctions) return;
             const docRef = getHabitDefinitionsPath();
             await firestoreFunctions.setDoc(docRef, { definitions: habitDefinitions });
         }
 
         async function saveDailyEntry(dateKey, data) {
-            if (!userId) return;
+            if (!userId || !firestoreFunctions) return;
             const docRef = getUserDataPath(dateKey);
             await firestoreFunctions.setDoc(docRef, data, { merge: true });
+            
+            // Trigger challenge progress update after every save
+            if (activeChallenge && dateKey >= activeChallenge.startDate && dateKey <= activeChallenge.endDate) {
+                 updateChallengeProgress(activeChallenge);
+            }
         }
         
-        /**
-         * Listens to the user's habit definitions.
-         */
         function setupHabitDefinitionsListener() {
-            if (!userId) return;
-
+            if (!userId || !firestoreFunctions) return;
             const docRef = getHabitDefinitionsPath();
 
             firestoreFunctions.onSnapshot(docRef, (docSnap) => {
                 if (docSnap.exists() && docSnap.data().definitions) {
                     habitDefinitions = docSnap.data().definitions;
                 } else if (habitDefinitions.length === 0) {
-                    // Initialize with default habits if none exist
                     habitDefinitions = [
                         { id: 'h1', name: 'Exercise', type: 'checkbox', target: 1, unit: null, color: getHabitColor(0) },
                         { id: 'h2', name: 'Walk', type: 'checkbox', target: 1, unit: null, color: getHabitColor(1) },
@@ -365,12 +988,8 @@
             });
         }
         
-        /**
-         * Listens to all daily entry data for the current month.
-         */
         function setupDailyEntriesListener() {
-            if (!userId) return;
-            
+            if (!userId || !firestoreFunctions) return;
             const collectionRef = firestoreFunctions.collection(db, 'artifacts', appId, 'users', userId, 'dailyEntries');
 
             firestoreFunctions.onSnapshot(collectionRef, (snapshot) => {
@@ -388,10 +1007,9 @@
                 loadingOverlay.style.display = 'none';
             });
         }
-
-
-        // --- 7. UI Rendering Functions ---
-
+        
+        // --- 7. UI Rendering Functions (Hoisted) ---
+        
         function renderHabitSetupUI() {
             habitSetupList.innerHTML = '';
             habitDefinitions.forEach((habit, index) => {
@@ -460,8 +1078,7 @@
             `;
         }
 
-
-        // --- 8. Core Logic & Event Handlers ---
+        // --- 8. Core Logic & Metric Functions (Hoisted) ---
         
         function calculateDailyScore(dateKey) {
             const data = habitData[dateKey] || {};
@@ -573,7 +1190,6 @@
         }
 
         function updateAverages() {
-            // RENDER DYNAMIC AVERAGE BARS
             avgBarsContainer.innerHTML = '';
             const dateKey = getDateKey(selectedDate);
             const data = habitData[dateKey] || {};
@@ -588,12 +1204,9 @@
                 } else if (habit.type.startsWith('number')) {
                     const numValue = parseFloat(value) || 0;
                     if (habit.targetType === 'max') {
-                         // Phone Time: Show progress as remaining budget
                          percent = Math.max(0, Math.min(100, (1 - (numValue / habit.target)) * 100));
-                         // Invert color if target is exceeded
-                         barColor = (numValue > habit.target) ? '#dc2626' : habit.color; // Red if failed max target
+                         barColor = (numValue > habit.target) ? '#dc2626' : habit.color;
                     } else {
-                        // Hydrate, Sleep, Learn
                         percent = Math.min(100, (numValue / habit.target) * 100);
                     }
                 }
@@ -618,7 +1231,6 @@
             const habitId = element.dataset.id;
             let updatePayload = {};
             
-            // 1. Determine the value and prepare payload
             if (element.dataset.type === 'checkbox') {
                 updatePayload = { [habitId]: parseInt(element.dataset.state) };
             } else if (element.id === 'remark-input') {
@@ -629,14 +1241,11 @@
                 return; 
             }
 
-            // 2. Update local state before saving (for immediate UI updates)
             habitData[dateKey] = habitData[dateKey] || {};
             Object.assign(habitData[dateKey], updatePayload);
 
-            // 3. Save to Firestore
             await saveDailyEntry(dateKey, updatePayload);
             
-            // 4. Update UI Metrics
             const dailyScore = calculateDailyScore(dateKey);
             tooltipTodayScore.textContent = `${dailyScore} / 10`;
             
@@ -662,9 +1271,6 @@
             updateAverages(); 
         }
 
-        /**
-         * Generates and displays the calendar for a given month and year.
-         */
         function buildCalendar(month, year) {
             calendarGrid.innerHTML = ''; 
             monthYearTitle.textContent = `${monthNames[month]} ${year}`;
@@ -719,7 +1325,6 @@
 
         // --- 9. Event Listeners ---
         
-        // Habit Setup Listeners
         document.addEventListener('DOMContentLoaded', () => {
 
             db = window.db;
@@ -728,7 +1333,28 @@
             initialAuthToken = window.initialAuthToken;
             firestoreFunctions = window.firestore;
 
+            // Group Button Handlers
+            createGroupBtn.addEventListener('click', () => {
+                if (groupId) {
+                    leaveGroup();
+                } else {
+                    createGroup();
+                }
+            });
+            joinGroupBtn.addEventListener('click', joinGroup);
 
+            // Challenge Button Handlers (NEW)
+            soloChallengeBtn.addEventListener('click', () => openChallengeModal('solo'));
+            groupChallengeBtn.addEventListener('click', () => openChallengeModal('group'));
+            challengeCompleteBtn.addEventListener('click', endChallengeLocally);
+
+            // Modal Handlers (NEW)
+            challengeHabitSelect.addEventListener('change', updateChallengeUnitDisplay);
+            challengeDurationSelect.addEventListener('change', updateChallengeUnitDisplay);
+            modalCancelBtn.addEventListener('click', closeChallengeModal);
+            modalStartBtn.addEventListener('click', createChallengeFinal);
+            
+            // Habit Setup Listeners
             addHabitBtn.addEventListener('click', () => {
                 const name = newHabitNameInput.value.trim();
                 const type = newHabitTypeSelect.value;
@@ -740,7 +1366,7 @@
                 let targetType = 'min';
 
                 if (type === 'number-hr') {
-                    target = name.toLowerCase().includes('phone') ? 3 : 8; // Default 8 hrs sleep or 3 hrs max for phone
+                    target = name.toLowerCase().includes('phone') ? 3 : 8;
                     unit = 'hrs';
                     if (name.toLowerCase().includes('phone')) targetType = 'max';
                 } else if (type === 'number-cup') {
@@ -768,11 +1394,8 @@
                 if (removeBtn) {
                     const habitIdToRemove = removeBtn.dataset.id;
                     
-                    // Remove from definitions
                     habitDefinitions = habitDefinitions.filter(h => h.id !== habitIdToRemove);
                     await saveHabitDefinitions();
-
-                    // OPTIONAL: Delete the habit data from all daily entries. Too expensive/complex for V1.
                 }
             });
 
@@ -780,8 +1403,7 @@
             habitsList.addEventListener('click', (event) => {
                 const checkbox = event.target.closest('.habit-checkbox');
                 if (!checkbox) return; 
-                
-                if (getDateKey(selectedDate) > getDateKey(today)) return; // Prevent clicking future dates
+                if (getDateKey(selectedDate) > getDateKey(today)) return;
 
                 let currentState = parseInt(checkbox.dataset.state || '0');
                 currentState = (currentState + 1) % 3; 
@@ -841,7 +1463,16 @@
             async function initializeApp() {
                 loadingOverlay.style.display = 'flex';
                 
-                // 1. Authentication
+                // If Firebase wasn't initialized in the module block (due to missing config), bypass auth attempt
+                if (!window.auth) {
+                    console.error("Skipping Firebase Auth due to missing configuration.");
+                    userIdSpan.textContent = 'ERROR: No Database Connection';
+                    loadingOverlay.style.display = 'none';
+                    buildCalendar(currentMonth, currentYear);
+                    loadHabitsForSelectedDate();
+                    return;
+                }
+
                 try {
                     if (initialAuthToken) {
                         await firestoreFunctions.signInWithCustomToken(auth, initialAuthToken);
@@ -849,31 +1480,31 @@
                         await firestoreFunctions.signInAnonymously(auth);
                     }
                 } catch (error) {
-                    console.error("Firebase Auth failed:", error);
+                    console.error("Firebase Auth failed during sign-in attempt:", error);
                 }
 
-                // 2. Auth State Change Listener
                 firestoreFunctions.onAuthStateChanged(auth, (user) => {
+                    loadingOverlay.style.display = 'none';
                     if (user) {
                         userId = user.uid;
                         userIdSpan.textContent = userId;
                         isAuthReady = true;
 
-                        // 3. Setup Firestore Listeners
-                        // setupGroupListener(); 
+                        setupGroupMetadataListener(); 
                         setupHabitDefinitionsListener();
                         setupDailyEntriesListener(); 
 
                     } else {
-                        userIdSpan.textContent = 'Signed Out';
+                        userIdSpan.textContent = 'Auth Failed / Signed Out. Data will not save.';
+                        console.error("Authentication failed. Data saving/loading is disabled.");
+                        buildCalendar(currentMonth, currentYear); 
+                        loadHabitsForSelectedDate(); 
                     }
                 });
                 
-                // 4. Initial UI Renders
                 document.getElementById('main-title').textContent = `${monthNames[currentMonth]} Dashboard`;
             }
             
-            // Execute the initialization function
             initializeApp();
         });
     </script>
