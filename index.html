@@ -15,7 +15,7 @@
 
         // IMPORTANT: We use window scope for global access in the main script block
         window.firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // FIXED: Changed __appId to __app_id
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         // --- RESILIENT INITIALIZATION ---
@@ -1225,7 +1225,7 @@
         }
 
         async function saveAndRefresh(element) {
-            if (!userId || getDateKey(selectedDate) > getDateKey(today)) return; 
+            if (!userId || getDateKey(selectedDate) > getDateKey(today) || !firestoreFunctions) return; 
 
             const dateKey = getDateKey(selectedDate);
             const habitId = element.dataset.id;
