@@ -166,7 +166,7 @@
     <!-- End Challenge Modal -->
 
     <!-- Main Grid Container -->
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
+    <div class="grid grid-cols-1 lg:col-span-4 gap-6 max-w-7xl mx-auto">
 
         <!-- Header (Spans all columns) -->
         <header class="panel lg:col-span-4 flex items-center justify-between relative"> 
@@ -406,6 +406,7 @@
         const USER_GROUP_COLLECTION = 'metadata';
         const GROUPS_COLLECTION = 'groups'; 
         const CHALLENGES_COLLECTION = 'challenges'; // New collection for public challenges
+        const OFFLINE_CHALLENGE_KEY = 'activeChallenge'; // Key for session storage persistence
         
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
         
@@ -775,8 +776,8 @@
                     if (dailyEntry && dailyEntry[challenge.habitId] !== undefined) {
                         const value = dailyEntry[challenge.habitId];
                         
-                        if (challenge.unit === 'count') {
-                            // Checkbox habit: 1 point per day completed (state 1)
+                        // Checkbox habit: 1 point per day completed (state 1)
+                        if (challenge.unit === 'days') { 
                             if (value === 1) {
                                 currentProgress += 1;
                             }
@@ -787,6 +788,21 @@
                     }
                 }
             }
+            
+            // --- OFFLINE FIX: Update progress locally in challenge object ---
+            if (!window.auth) {
+                 // Check if the participant structure is initialized for offline mode
+                 if (!activeChallenge.participants[userId || 'default']) {
+                     activeChallenge.participants[userId || 'default'] = { progress: 0, lastUpdated: new Date().toISOString() };
+                 }
+                 
+                 activeChallenge.participants[userId || 'default'].progress = currentProgress;
+                 renderActiveChallengeUI();
+                 sessionStorage.setItem(OFFLINE_CHALLENGE_KEY, JSON.stringify(activeChallenge));
+                 return;
+            }
+            // --- END OFFLINE FIX ---
+
 
             // Update progress in Firestore if needed
             if (challenge.participants[userId] && challenge.participants[userId].progress !== currentProgress) {
@@ -807,7 +823,7 @@
                 firestoreFunctions.updateDoc(getUserGroupMetadataPath(), { activeChallengeId: firestoreFunctions.deleteField() });
             } else {
                  // Offline mode, just clear session storage
-                 sessionStorage.removeItem('activeChallenge');
+                 sessionStorage.removeItem(OFFLINE_CHALLENGE_KEY);
             }
 
             renderActiveChallengeUI();
@@ -819,12 +835,12 @@
             if (!activeChallenge) {
                 activeChallengePanel.classList.add('hidden');
                 // --- OFFLINE FIX: Ensure Active Challenge data is always checked from storage here ---
-                const storedChallenge = sessionStorage.getItem('activeChallenge');
+                const storedChallenge = sessionStorage.getItem(OFFLINE_CHALLENGE_KEY);
                 if (storedChallenge) {
                      try {
                           activeChallenge = JSON.parse(storedChallenge);
                      } catch(e) {
-                          console.error("Failed to parse stored challenge:", e);
+                          sessionStorage.removeItem(OFFLINE_CHALLENGE_KEY); // Clear bad storage
                      }
                 }
                 if (!activeChallenge) return; // If still null, return
@@ -896,7 +912,7 @@
             
             // --- OFFLINE FIX: Update progress locally for display ---
             if (!window.auth) {
-                 sessionStorage.setItem('activeChallenge', JSON.stringify(activeChallenge));
+                 sessionStorage.setItem(OFFLINE_CHALLENGE_KEY, JSON.stringify(activeChallenge));
             }
         }
         
@@ -998,7 +1014,6 @@
             // --- OFFLINE MODE: Bypass database save, use session storage ---
             if (!window.auth) {
                  activeChallenge = challengeData;
-                 renderActiveChallengeUI(); // Render immediately to display challenge
                  
                  // Manually populate other members for demo purposes
                  if (type === 'group') {
@@ -1009,7 +1024,9 @@
                       };
                  }
                  
-                 sessionStorage.setItem('activeChallenge', JSON.stringify(activeChallenge));
+                 sessionStorage.setItem(OFFLINE_CHALLENGE_KEY, JSON.stringify(activeChallenge));
+                 renderActiveChallengeUI(); // Render immediately to display challenge
+                 
                  modalErrorMessage.textContent = `Challenge "${generatedChallengeName}" started in Offline Mode!`;
                  setTimeout(closeChallengeModal, 1000);
                  return;
@@ -1300,15 +1317,27 @@
                 let percent = 0;
                 let barColor = habit.color;
                 const value = data[habit.id];
+                const numValue = parseFloat(value) || 0;
                 
                 if (habit.type === 'checkbox') {
-                    percent = (value === 1) ? 100 : 0;
+                    // Checkbox bars: 100% if marked complete (state 1)
+                    percent = (value === 1) ? 100 : 0; 
                 } else if (habit.type.startsWith('number')) {
-                    const numValue = parseFloat(value) || 0;
+                    
                     if (habit.targetType === 'max') {
-                         percent = Math.max(0, Math.min(100, (1 - (numValue / habit.target)) * 100));
-                         barColor = (numValue > habit.target) ? '#dc2626' : habit.color;
+                         // Phone Time: Bar fills up as time approaches the MAX target
+                         percent = Math.min(100, (numValue / habit.target) * 100);
+                         
+                         // If the max target is exceeded, the bar turns red
+                         if (numValue > habit.target) {
+                             barColor = '#dc2626'; // Red
+                             percent = 100; // Keep bar full red if exceeded
+                         } else {
+                             barColor = '#f97316'; // Orange/Normal color
+                         }
+
                     } else {
+                        // Hydrate, Sleep, Learn: Bar fills up as time approaches MIN target
                         percent = Math.min(100, (numValue / habit.target) * 100);
                     }
                 }
@@ -1549,7 +1578,11 @@
             habitsList.addEventListener('input', (event) => {
                  const input = event.target.closest('input');
                  if (input && (input.dataset.type || input.id === 'remark-input')) {
+                    // This is the manual trigger needed for input fields in offline mode
                     saveAndRefresh(input);
+                    // Force the Averages and Challenge UI to update immediately after number input change
+                    updateAverages(); 
+                    renderActiveChallengeUI(); 
                  }
             });
 
@@ -1600,12 +1633,12 @@
                     userId = 'default'; // Set a mock ID for challenge tracking
                     
                     // Check session storage for existing offline challenge
-                    const storedChallenge = sessionStorage.getItem('activeChallenge');
+                    const storedChallenge = sessionStorage.getItem(OFFLINE_CHALLENGE_KEY);
                     if (storedChallenge) {
                          try {
                               activeChallenge = JSON.parse(storedChallenge);
                          } catch(e) {
-                              sessionStorage.removeItem('activeChallenge'); // Clear bad storage
+                              sessionStorage.removeItem(OFFLINE_CHALLENGE_KEY); // Clear bad storage
                          }
                     }
 
