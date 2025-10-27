@@ -968,15 +968,8 @@
                 if (docSnap.exists() && docSnap.data().definitions) {
                     habitDefinitions = docSnap.data().definitions;
                 } else if (habitDefinitions.length === 0) {
-                    habitDefinitions = [
-                        { id: 'h1', name: 'Exercise', type: 'checkbox', target: 1, unit: null, color: getHabitColor(0) },
-                        { id: 'h2', name: 'Walk', type: 'checkbox', target: 1, unit: null, color: getHabitColor(1) },
-                        { id: 'h3', name: 'Hydrate', type: 'number-cup', target: 13, unit: 'cups', color: getHabitColor(2) },
-                        { id: 'h4', name: 'Sleep', type: 'number-hr', target: 8, unit: 'hrs', color: getHabitColor(3) },
-                        { id: 'h5', name: 'Learn', type: 'number-hr', target: 3, unit: 'hrs', color: getHabitColor(4) },
-                        { id: 'h6', name: 'Phone Time', type: 'number-hr', target: 3, unit: 'hrs', targetType: 'max', color: getHabitColor(5) },
-                        { id: 'h7', name: 'Rise Early', type: 'checkbox', target: 1, unit: null, color: getHabitColor(6) },
-                    ];
+                    // This fallback logic now runs only if Firebase is connected but no data exists.
+                    habitDefinitions = getDefaultHabitDefinitions(); 
                     saveHabitDefinitions(); 
                 }
                 
@@ -1006,6 +999,19 @@
                 console.error("Error listening to daily entries:", error);
                 loadingOverlay.style.display = 'none';
             });
+        }
+
+        // --- NEW: Default Habit Definitions Function ---
+        function getDefaultHabitDefinitions() {
+             return [
+                { id: 'h1', name: 'Exercise', type: 'checkbox', target: 1, unit: null, color: getHabitColor(0) },
+                { id: 'h2', name: 'Walk', type: 'checkbox', target: 1, unit: null, color: getHabitColor(1) },
+                { id: 'h3', name: 'Hydrate', type: 'number-cup', target: 13, unit: 'cups', color: getHabitColor(2) },
+                { id: 'h4', name: 'Sleep', type: 'number-hr', target: 8, unit: 'hrs', color: getHabitColor(3) },
+                { id: 'h5', name: 'Learn', type: 'number-hr', target: 3, unit: 'hrs', color: getHabitColor(4) },
+                { id: 'h6', name: 'Phone Time', type: 'number-hr', target: 3, unit: 'hrs', targetType: 'max', color: getHabitColor(5) },
+                { id: 'h7', name: 'Rise Early', type: 'checkbox', target: 1, unit: null, color: getHabitColor(6) },
+            ];
         }
         
         // --- 7. UI Rendering Functions (Hoisted) ---
@@ -1225,7 +1231,8 @@
         }
 
         async function saveAndRefresh(element) {
-            if (!userId || getDateKey(selectedDate) > getDateKey(today) || !firestoreFunctions) return; 
+            // ONLY attempt to save if the database connection is active (window.auth exists)
+            if (!userId || getDateKey(selectedDate) > getDateKey(today) || !window.auth) return; 
 
             const dateKey = getDateKey(selectedDate);
             const habitId = element.dataset.id;
@@ -1254,6 +1261,12 @@
         }
 
         function loadHabitsForSelectedDate() {
+            // --- OFFLINE FIX: Ensure habitDefinitions are set before rendering ---
+            if (habitDefinitions.length === 0) {
+                 habitDefinitions = getDefaultHabitDefinitions();
+            }
+            // --- END OFFLINE FIX ---
+
             renderHabitTrackingUI();
             
             const dateKey = getDateKey(selectedDate);
@@ -1356,6 +1369,22 @@
             
             // Habit Setup Listeners
             addHabitBtn.addEventListener('click', () => {
+                // If offline, just push to local array
+                if (!window.auth) {
+                    const newHabit = {
+                        id: 'h' + (Date.now()).toString().slice(-6),
+                        name: newHabitNameInput.value.trim(),
+                        type: newHabitTypeSelect.value,
+                        target: 1, unit: null, targetType: 'min',
+                        color: getHabitColor(habitDefinitions.length)
+                    };
+                    habitDefinitions.push(newHabit);
+                    renderHabitSetupUI();
+                    renderHabitTrackingUI();
+                    newHabitNameInput.value = '';
+                    return;
+                }
+
                 const name = newHabitNameInput.value.trim();
                 const type = newHabitTypeSelect.value;
                 if (!name) return;
@@ -1395,7 +1424,13 @@
                     const habitIdToRemove = removeBtn.dataset.id;
                     
                     habitDefinitions = habitDefinitions.filter(h => h.id !== habitIdToRemove);
-                    await saveHabitDefinitions();
+                    
+                    if (window.auth) {
+                        await saveHabitDefinitions();
+                    } else {
+                        renderHabitSetupUI();
+                        renderHabitTrackingUI();
+                    }
                 }
             });
 
@@ -1463,10 +1498,10 @@
             async function initializeApp() {
                 loadingOverlay.style.display = 'flex';
                 
-                // If Firebase wasn't initialized in the module block (due to missing config), bypass auth attempt
+                // --- OFFLINE MODE: Load default habits immediately ---
                 if (!window.auth) {
-                    console.error("Skipping Firebase Auth due to missing configuration.");
-                    userIdSpan.textContent = 'ERROR: No Database Connection';
+                    userIdSpan.textContent = 'ERROR: No Database Connection (Offline Mode)';
+                    habitDefinitions = getDefaultHabitDefinitions(); // Load the default set
                     loadingOverlay.style.display = 'none';
                     buildCalendar(currentMonth, currentYear);
                     loadHabitsForSelectedDate();
@@ -1496,7 +1531,6 @@
 
                     } else {
                         userIdSpan.textContent = 'Auth Failed / Signed Out. Data will not save.';
-                        console.error("Authentication failed. Data saving/loading is disabled.");
                         buildCalendar(currentMonth, currentYear); 
                         loadHabitsForSelectedDate(); 
                     }
