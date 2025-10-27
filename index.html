@@ -800,7 +800,8 @@
          * Calculates and updates the user's progress for the challenge.
          */
         async function updateChallengeProgress(challenge) {
-            if (!userId || !challenge || !firestoreFunctions) return;
+            // FIX: Added guard for offline mode so it doesn't crash on firebase function usage
+            if (!userId || !challenge) return;
 
             let currentProgress = 0;
             
@@ -1619,7 +1620,7 @@
                 }
             });
 
-            // Focus Listeners for collapsing Habit Setup Input (FIXED)
+            // Focus Listeners for collapsing Habit Setup Input (FINAL FIX)
             habitSetupHeader.addEventListener('click', () => {
                  setupInputContainer.classList.toggle('active');
                  // Ensure the cursor is placed in the input if opening
@@ -1629,7 +1630,7 @@
             });
             // Hides the input area when you click away
             document.addEventListener('click', (event) => {
-                const setupPanel = document.querySelector('.panel:last-of-type'); // The Habit Setup panel
+                const setupPanel = document.getElementById('setup-input-container').parentNode; // The entire Habit Setup panel div
                 const isClickInsideSetupPanel = setupPanel.contains(event.target);
 
                 if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel) {
