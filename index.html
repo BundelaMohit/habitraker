@@ -106,6 +106,11 @@
         .modal-content {
             @apply bg-neutral-900 p-6 rounded-xl shadow-2xl w-full max-w-md border border-neutral-700;
         }
+
+        /* Style for Group Member Display */
+        .member-progress-item {
+            @apply flex items-center justify-between text-sm py-1 border-b border-neutral-800 last:border-b-0;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -252,7 +257,7 @@
                     <button id="solo-challenge-btn" class="challenge-btn solo">
                         Start Solo Challenge
                     </button>
-                    <button id="group-challenge-btn" class="challenge-btn group" disabled>
+                    <button id="group-challenge-btn" id="group-challenge-btn" class="challenge-btn group" disabled>
                         Start Group Challenge
                     </button>
                 </div>
@@ -282,6 +287,14 @@
                     </div>
                     
                     <p class="text-xs text-neutral-400" id="challenge-time-remaining">Ends in X weeks.</p>
+
+                    <!-- Group Member Progress List (NEW) -->
+                    <div id="group-member-progress" class="pt-3 border-t border-neutral-800">
+                        <h4 class="text-xs font-semibold text-neutral-500 mb-2">Participants</h4>
+                        <div id="member-list-container">
+                            <!-- Member progress bars/names go here -->
+                        </div>
+                    </div>
                 </div>
             </div>
             <!-- END Active Challenge Panel -->
@@ -450,6 +463,7 @@
         const challengeProgressBar = document.getElementById('challenge-progress-bar');
         const challengeTimeRemaining = document.getElementById('challenge-time-remaining');
         const challengeCompleteBtn = document.getElementById('challenge-complete-btn'); // Defined here
+        const memberListContainer = document.getElementById('member-list-container'); // NEW container reference
         
 
         // --- Modal References (NEW) ---
@@ -676,6 +690,9 @@
         }
 
         function renderGroupUI() {
+            // Check if saving is disabled before enabling buttons
+            const isSavingEnabled = !!window.auth;
+
             if (groupId) {
                 groupStatusSpan.textContent = `Group: ${groupId}`;
                 groupStatusSpan.classList.add('text-green-500');
@@ -696,7 +713,25 @@
                 joinGroupBtn.style.display = 'block';
                 groupIdInput.style.display = 'block';
             }
-            groupChallengeBtn.disabled = !groupId;
+            
+            // Disable buttons if we are offline (no window.auth)
+            createGroupBtn.disabled = !isSavingEnabled;
+            joinGroupBtn.disabled = !isSavingEnabled;
+            groupChallengeBtn.disabled = !groupId || !isSavingEnabled;
+
+            if (!isSavingEnabled) {
+                if (groupMessage.textContent === '') {
+                    groupMessage.textContent = 'Database required for Group features.';
+                }
+                createGroupBtn.classList.remove('bg-green-600', 'bg-red-600', 'hover:bg-green-500', 'hover:bg-red-500');
+                createGroupBtn.classList.add('bg-neutral-600');
+                joinGroupBtn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+                joinGroupBtn.classList.add('bg-neutral-600');
+            } else {
+                 if (groupMessage.textContent === 'Database required for Group features.') {
+                     groupMessage.textContent = '';
+                 }
+            }
         }
 
         // --- 5. Challenge Management Logic ---
@@ -766,40 +801,57 @@
         function endChallengeLocally() {
             activeChallenge = null;
             if (challengeListener) challengeListener();
-            if (firestoreFunctions) {
+            
+            if (window.auth) {
+                // Database is connected, update metadata
                 firestoreFunctions.updateDoc(getUserGroupMetadataPath(), { activeChallengeId: firestoreFunctions.deleteField() });
+            } else {
+                 // Offline mode, just clear session storage
+                 sessionStorage.removeItem('activeChallenge');
             }
+
             renderActiveChallengeUI();
         }
 
         function renderActiveChallengeUI() {
             const activeChallengePanel = document.getElementById('active-challenge-panel');
+            
             if (!activeChallenge) {
                 activeChallengePanel.classList.add('hidden');
-                return;
+                // --- OFFLINE FIX: Ensure Active Challenge data is always checked from storage here ---
+                const storedChallenge = sessionStorage.getItem('activeChallenge');
+                if (storedChallenge) {
+                     try {
+                          activeChallenge = JSON.parse(storedChallenge);
+                     } catch(e) {
+                          console.error("Failed to parse stored challenge:", e);
+                     }
+                }
+                if (!activeChallenge) return; // If still null, return
             }
-            
+
+            // --- Continue Rendering UI ---
             activeChallengePanel.classList.remove('hidden');
-            const userProgress = activeChallenge.participants[userId]?.progress || 0;
+            const userProgress = activeChallenge.participants[userId || 'default']?.progress || 0; // Use 'default' placeholder if offline
             const goal = activeChallenge.target;
             const percentage = Math.min(100, (userProgress / goal) * 100);
+            const unit = activeChallenge.unit;
             
             challengeNameDisplay.textContent = activeChallenge.name;
-            challengeGoalDisplay.textContent = `${userProgress.toFixed(activeChallenge.unit === 'hrs' ? 1 : 0)} / ${goal} ${activeChallenge.unit}`;
+            challengeGoalDisplay.textContent = `${userProgress.toFixed(unit === 'hrs' ? 1 : 0)} / ${goal} ${unit}`;
             challengeProgressValue.textContent = `${percentage.toFixed(0)}%`;
             challengeProgressBar.style.width = `${percentage}%`;
             
             // Calculate time remaining
-            const endDate = new Date(activeChallenge.endDate + 'T23:59:59'); // Set to end of day
+            const endDate = new Date(activeChallenge.endDate + 'T23:59:59'); 
             const diffTime = endDate.getTime() - today.getTime();
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
             
             if (diffDays <= 0) {
                  challengeTimeRemaining.textContent = "Challenge ended.";
-                 // Auto-end if challenge is completed or over
                  if (diffDays <= 0 || userProgress >= goal) {
                      challengeCompleteBtn.textContent = 'Challenge Ended (View Result)';
-                     challengeCompleteBtn.onclick = endChallengeLocally; // Ends it on click
+                     challengeCompleteBtn.onclick = endChallengeLocally;
                  }
             } else if (diffDays <= 7) {
                  challengeTimeRemaining.textContent = `Ends in ${diffDays} day${diffDays === 1 ? '' : 's'}.`;
@@ -809,7 +861,7 @@
             }
             
             challengeCompleteBtn.textContent = userProgress >= goal ? 'Goal Achieved!' : 'End Challenge';
-            challengeCompleteBtn.disabled = userProgress < goal; // Only enable if goal is met
+            challengeCompleteBtn.disabled = userProgress < goal;
             
             if (userProgress >= goal) {
                  challengeCompleteBtn.textContent = 'Goal Achieved! (Click to End)';
@@ -820,22 +872,48 @@
                  challengeCompleteBtn.classList.remove('bg-green-600');
             }
 
+            // --- Group Member Progress Display ---
+            const challengeGoal = activeChallenge.target;
+            
+            if (activeChallenge.type === 'group') {
+                const membersHtml = Object.entries(activeChallenge.participants).map(([memberId, participant]) => {
+                    const memberProgress = participant.progress || 0;
+                    const isCurrentUser = memberId === (userId || 'default');
+                    const color = isCurrentUser ? 'text-amber-500' : 'text-neutral-300';
+                    const name = isCurrentUser ? 'You' : memberId.substring(0, 8);
+
+                    return `
+                        <div class="member-progress-item">
+                            <span class="${color} font-medium">${name}</span>
+                            <span class="${color} font-bold">${memberProgress.toFixed(unit === 'hrs' ? 1 : 0)} / ${challengeGoal}</span>
+                        </div>
+                    `;
+                }).join('');
+                memberListContainer.innerHTML = membersHtml;
+            } else {
+                memberListContainer.innerHTML = `<p class="text-xs text-neutral-500">This is a solo challenge. Check your progress above!</p>`;
+            }
+            
+            // --- OFFLINE FIX: Update progress locally for display ---
+            if (!window.auth) {
+                 sessionStorage.setItem('activeChallenge', JSON.stringify(activeChallenge));
+            }
         }
         
         // --- Modal Logic ---
 
         function openChallengeModal(type) {
-            if (!userId || !firestoreFunctions) { alert("Database not connected."); return; }
+            if (!userId && window.auth) { alert("Please wait for authentication."); return; }
+            if (habitDefinitions.length === 0) { alert("Please add at least one habit first!"); return; }
+            if (activeChallenge) { alert("Please complete or end your current challenge before starting a new one."); return; }
+            if (type === 'group' && !groupId) { alert("You must create or join a group to start a group challenge."); return; }
 
-            if (habitDefinitions.length === 0) {
-                alert("Please add at least one habit first!");
-                return;
+            // Disable group challenge option if offline, force mock solo
+            if (type === 'group' && !window.auth) {
+                 alert("Group challenges are disabled in Offline Mode. Starting Solo challenge mock.");
+                 type = 'solo';
             }
-            if (activeChallenge) {
-                 alert("Please complete or end your current challenge before starting a new one.");
-                 return;
-            }
-
+            
             modalTitle.textContent = `${type === 'solo' ? 'Start Solo Challenge' : 'Start Group Challenge'}`;
             challengeModal.dataset.type = type;
             modalErrorMessage.textContent = '';
@@ -879,7 +957,7 @@
         }
         
         /**
-         * Finalizes challenge creation and saves it to Firestore.
+         * Finalizes challenge creation and saves it to Firestore/Session Storage.
          */
         async function createChallengeFinal() {
             const type = challengeModal.dataset.type;
@@ -899,13 +977,14 @@
             
             const habit = habitDefinitions.find(h => h.id === habitId);
             const habitName = habit.name.replace(/\s\(.*\)/g, '').trim();
+            const generatedChallengeName = `${type === 'group' ? 'Group' : 'Solo'} Challenge: ${habitName}`;
 
             const challengeData = {
                 id: challengeId,
                 type: type, 
                 groupId: type === 'group' ? groupId : null,
-                createdBy: userId,
-                name: `${type === 'group' ? 'Group' : 'Solo'} Challenge: ${habitName}`,
+                createdBy: userId || 'default', // Use 'default' placeholder when offline
+                name: generatedChallengeName,
                 habitId: habitId,
                 target: target,
                 unit: habit.unit || 'days',
@@ -913,26 +992,43 @@
                 startDate: startDate,
                 endDate: getDateKey(endDate),
                 
-                participants: {}
+                participants: { [userId || 'default']: { progress: 0, lastUpdated: new Date().toISOString() } } // Ensure current user is in participants
             };
 
-            if (type === 'group') {
-                 Object.keys(groupMembers).forEach(memberId => {
-                     challengeData.participants[memberId] = { progress: 0, lastUpdated: new Date().toISOString() };
-                 });
-            } else {
-                 challengeData.participants[userId] = { progress: 0, lastUpdated: new Date().toISOString() };
+            // --- OFFLINE MODE: Bypass database save, use session storage ---
+            if (!window.auth) {
+                 activeChallenge = challengeData;
+                 renderActiveChallengeUI(); // Render immediately to display challenge
+                 
+                 // Manually populate other members for demo purposes
+                 if (type === 'group') {
+                      activeChallenge.participants = {
+                           [userId || 'default']: { progress: 0, lastUpdated: new Date().toISOString() },
+                           'MOCK001': { progress: 0, lastUpdated: new Date().toISOString() },
+                           'MOCK002': { progress: 0, lastUpdated: new Date().toISOString() },
+                      };
+                 }
+                 
+                 sessionStorage.setItem('activeChallenge', JSON.stringify(activeChallenge));
+                 modalErrorMessage.textContent = `Challenge "${generatedChallengeName}" started in Offline Mode!`;
+                 setTimeout(closeChallengeModal, 1000);
+                 return;
             }
+            // --- END OFFLINE MODE ---
 
             try {
+                // ONLINE MODE
+                if (type === 'group') {
+                     Object.keys(groupMembers).forEach(memberId => {
+                         challengeData.participants[memberId] = { progress: 0, lastUpdated: new Date().toISOString() };
+                     });
+                }
+                
                 await firestoreFunctions.setDoc(getChallengePath(challengeId), challengeData);
                 await firestoreFunctions.setDoc(getUserGroupMetadataPath(), { activeChallengeId: challengeId }, { merge: true });
 
-                modalErrorMessage.textContent = `Challenge "${challengeName}" started!`;
-                
-                setTimeout(() => {
-                    closeChallengeModal();
-                }, 1000);
+                modalErrorMessage.textContent = `Challenge "${generatedChallengeName}" started!`;
+                setTimeout(closeChallengeModal, 1000);
 
             } catch (e) {
                 console.error("Error starting challenge:", e);
@@ -1501,10 +1597,23 @@
                 // --- OFFLINE MODE: Load default habits immediately ---
                 if (!window.auth) {
                     userIdSpan.textContent = 'ERROR: No Database Connection (Offline Mode)';
+                    userId = 'default'; // Set a mock ID for challenge tracking
+                    
+                    // Check session storage for existing offline challenge
+                    const storedChallenge = sessionStorage.getItem('activeChallenge');
+                    if (storedChallenge) {
+                         try {
+                              activeChallenge = JSON.parse(storedChallenge);
+                         } catch(e) {
+                              sessionStorage.removeItem('activeChallenge'); // Clear bad storage
+                         }
+                    }
+
                     habitDefinitions = getDefaultHabitDefinitions(); // Load the default set
                     loadingOverlay.style.display = 'none';
                     buildCalendar(currentMonth, currentYear);
                     loadHabitsForSelectedDate();
+                    renderActiveChallengeUI(); // Render the challenge if loaded from storage
                     return;
                 }
 
