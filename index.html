@@ -111,6 +111,37 @@
         .member-progress-item {
             @apply flex items-center justify-between text-sm py-1 border-b border-neutral-800 last:border-b-0;
         }
+
+        /* NEW: Fixed height for habit list with scrollbar */
+        .habit-list-scroll {
+             max-height: 12rem; /* Adjusted for better visibility */
+             overflow-y: auto;
+             padding-right: 0.5rem; /* Space for scrollbar */
+        }
+        /* NEW: Added glow effect for successful habit addition/removal */
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(22, 163, 74, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+        }
+        .habit-added-glow {
+            animation: pulse-green 0.5s ease-out;
+        }
+
+        /* FIX: Collapsed Setup Input Container Styles */
+        .setup-input-container {
+             max-height: 0;
+             opacity: 0;
+             margin-top: 0 !important;
+             overflow: hidden;
+             transition: max-height 0.3s ease-out, opacity 0.3s ease-out, margin-top 0.3s ease-out;
+        }
+        .setup-input-container.active {
+             max-height: 12rem; /* Allows input fields to be visible */
+             opacity: 1;
+             margin-top: 1rem !important;
+        }
+
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -310,15 +341,15 @@
                 <h3 class="text-lg font-bold text-white mb-4">Monthly Stats</h3>
                 <div class="space-y-3">
                     <div class="flex items-center justify-between text-green-500">
-                        <span class="font-medium">Completed Habits</span> 
+                        <span id="stats-completed-label" class="font-medium">Completed Habits</span> 
                         <span id="stats-completed" class="font-bold">0</span> 
                     </div>
                     <div class="flex items-center justify-between text-red-500">
-                        <span class="font-medium">Failed Habits</span> 
+                        <span id="stats-failed-label" class="font-medium">Failed Habits</span> 
                         <span id="stats-failed" class="font-bold">0</span> 
                     </div>
                     <div class="flex items-center justify-between text-neutral-500">
-                        <span class="font-medium">Skipped Habits</span> 
+                        <span id="stats-skipped-label" class="font-medium">Skipped Habits</span> 
                         <span id="stats-skipped" class="font-bold">0</span> 
                     </div>
                 </div>
@@ -358,20 +389,22 @@
             
             <!-- Custom Habit Management -->
             <div class="panel">
-                <h3 class="text-lg font-bold text-white mb-4">Habit Setup</h3>
-                <div id="habit-setup-list" class="space-y-2">
+                <h3 id="habit-setup-header" class="text-lg font-bold text-white mb-4 cursor-pointer">Habit Setup</h3>
+                <div id="habit-setup-list" class="space-y-2 habit-list-scroll"> <!-- Added scroll class -->
                     <!-- Habit Definitions will be listed here -->
                 </div>
-                <div class="mt-4 flex space-x-2">
-                    <input id="new-habit-name" type="text" class="styled-input flex-grow" placeholder="New Habit Name">
-                    <select id="new-habit-type" class="styled-input w-24">
-                        <option value="checkbox">Check</option>
-                        <option value="number-hr">Hours</option>
-                        <option value="number-cup">Cups</option>
-                    </select>
-                    <button id="add-habit-btn" class="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold hover:bg-amber-400 transition-colors flex-shrink-0">
-                        Add
-                    </button>
+                <div id="setup-input-container" class="setup-input-container">
+                    <div class="mt-4 flex space-x-2">
+                        <input id="new-habit-name" type="text" class="styled-input flex-grow" placeholder="New Habit Name">
+                        <select id="new-habit-type" class="styled-input w-24">
+                            <option value="checkbox">Check</option>
+                            <option value="number-hr">Hours</option>
+                            <option value="number-cup">Cups</option>
+                        </select>
+                        <button id="add-habit-btn" class="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold hover:bg-amber-400 transition-colors flex-shrink-0">
+                            Add
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -445,6 +478,8 @@
         const newHabitNameInput = document.getElementById('new-habit-name');
         const newHabitTypeSelect = document.getElementById('new-habit-type');
         const addHabitBtn = document.getElementById('add-habit-btn');
+        const setupInputContainer = document.getElementById('setup-input-container'); // NEW reference
+        const habitSetupHeader = document.getElementById('habit-setup-header'); // NEW reference
         
         // --- Group References ---
         const groupStatusSpan = document.getElementById('group-status');
@@ -1133,7 +1168,7 @@
             habitSetupList.innerHTML = '';
             habitDefinitions.forEach((habit, index) => {
                 const item = document.createElement('div');
-                item.className = 'flex items-center justify-between p-2 bg-neutral-800 rounded-md';
+                item.className = 'flex items-center justify-between p-2 bg-neutral-800 rounded-md habit-added-glow'; // Added glow class for visual confirmation
                 item.innerHTML = `
                     <span class="text-sm text-neutral-300 flex-grow">${habit.name} (${habit.type.split('-')[0]})</span>
                     <button data-id="${habit.id}" class="remove-habit-btn text-red-500 hover:text-red-400 p-1 rounded-full">
@@ -1141,6 +1176,8 @@
                     </button>
                 `;
                 habitSetupList.appendChild(item);
+                // Remove the glow after the animation completes
+                setTimeout(() => item.classList.remove('habit-added-glow'), 600);
             });
         }
 
@@ -1283,25 +1320,39 @@
             let failed = 0;
             let skipped = 0;
             const monthStr = (currentMonth + 1).toString().padStart(2, '0');
-            const checkboxHabitIds = habitDefinitions.filter(h => h.type === 'checkbox').map(h => h.id);
+            
+            // Fix: Track completion for all habits, but only if they meet criteria (state 1 for check, target met for numbers)
+            habitDefinitions.forEach(habit => {
+                for (const dateKey in habitData) {
+                    if (dateKey.startsWith(`${currentYear}-${monthStr}`)) {
+                        const data = habitData[dateKey];
+                        const value = data[habit.id];
 
-            for (const dateKey in habitData) {
-                if (dateKey.startsWith(`${currentYear}-${monthStr}`)) {
-                    const data = habitData[dateKey];
-                    checkboxHabitIds.forEach(habitId => {
-                        const state = data[habitId] !== undefined ? data[habitId] : 0;
-                        if (state === 1) {
-                            completed++;
-                        } else if (state === 2) {
-                            failed++;
-                        } else {
-                            if (new Date(dateKey) <= today) {
-                                skipped++;
+                        if (value !== undefined) {
+                            if (habit.type === 'checkbox') {
+                                const state = data[habit.id] !== undefined ? data[habit.id] : 0;
+                                if (state === 1) completed++;
+                                else if (state === 2) failed++;
+                                else if (new Date(dateKey) <= today) skipped++;
+                            } else {
+                                // For number habits, check if goal was met on that day
+                                const numValue = parseFloat(value) || 0;
+                                let goalMet = false;
+                                if (habit.targetType === 'max') {
+                                    goalMet = numValue > 0 && numValue <= habit.target;
+                                } else {
+                                    goalMet = numValue >= habit.target;
+                                }
+
+                                if (goalMet) completed++;
+                                else if (value !== '') failed++; // Count as failed if logged but target not met
+                                else if (new Date(dateKey) <= today) skipped++;
                             }
                         }
-                    });
+                    }
                 }
-            }
+            });
+
 
             statsCompleted.textContent = completed;
             statsFailed.textContent = failed;
@@ -1356,8 +1407,7 @@
         }
 
         async function saveAndRefresh(element) {
-            // ONLY attempt to save if the database connection is active (window.auth exists)
-            if (!userId || getDateKey(selectedDate) > getDateKey(today) || !window.auth) return; 
+            // This runs for both online/offline. We need to manually update local data first.
 
             const dateKey = getDateKey(selectedDate);
             const habitId = element.dataset.id;
@@ -1376,13 +1426,20 @@
             habitData[dateKey] = habitData[dateKey] || {};
             Object.assign(habitData[dateKey], updatePayload);
 
-            await saveDailyEntry(dateKey, updatePayload);
+            // If ONLINE, save to DB
+            if (window.auth) {
+                 await saveDailyEntry(dateKey, updatePayload);
+            }
             
+            // If OFFLINE, the local data is already updated, we just need to refresh UI metrics
             const dailyScore = calculateDailyScore(dateKey);
             tooltipTodayScore.textContent = `${dailyScore} / 10`;
             
+            // Crucial calls to ensure bars update instantly
             updateAverages(); 
             updateAllMetrics();
+            renderActiveChallengeUI(); // Ensure challenge bar updates
+
         }
 
         function loadHabitsForSelectedDate() {
@@ -1507,6 +1564,9 @@
                     renderHabitSetupUI();
                     renderHabitTrackingUI();
                     newHabitNameInput.value = '';
+                    // Set focus back to input field for easy next entry
+                    newHabitNameInput.focus();
+                    setupInputContainer.classList.remove('active'); // Hide after adding
                     return;
                 }
 
@@ -1559,6 +1619,29 @@
                 }
             });
 
+            // Focus Listeners for collapsing Habit Setup Input (FIXED)
+            habitSetupHeader.addEventListener('click', () => {
+                 setupInputContainer.classList.toggle('active');
+                 // Ensure the cursor is placed in the input if opening
+                 if (setupInputContainer.classList.contains('active')) {
+                     newHabitNameInput.focus();
+                 }
+            });
+            // Hides the input area when you click away
+            document.addEventListener('click', (event) => {
+                const setupPanel = document.querySelector('.panel:last-of-type'); // The Habit Setup panel
+                const isClickInsideSetupPanel = setupPanel.contains(event.target);
+
+                if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel) {
+                    // Wait a moment before checking if the input is empty to avoid race conditions
+                    setTimeout(() => {
+                        if (newHabitNameInput.value.trim() === '') {
+                            setupInputContainer.classList.remove('active');
+                        }
+                    }, 10);
+                }
+            });
+
             // Daily Habits Tracking Listeners
             habitsList.addEventListener('click', (event) => {
                 const checkbox = event.target.closest('.habit-checkbox');
@@ -1572,6 +1655,14 @@
                 checkbox.textContent = currentState === 1 ? '✓' : currentState === 2 ? '×' : '';
                 checkbox.style.backgroundColor = currentState === 0 ? '#404040' : habitDefinitions.find(h => h.id === checkbox.dataset.id)?.color || '#f59e0b';
                 
+                // CRUCIAL: Must update local data before refresh in offline mode
+                const dateKey = getDateKey(selectedDate);
+                const habitId = checkbox.dataset.id;
+                const updatePayload = { [habitId]: currentState };
+                habitData[dateKey] = habitData[dateKey] || {};
+                Object.assign(habitData[dateKey], updatePayload);
+
+                // Now refresh all metrics
                 saveAndRefresh(checkbox); 
             });
 
@@ -1579,10 +1670,16 @@
                  const input = event.target.closest('input');
                  if (input && (input.dataset.type || input.id === 'remark-input')) {
                     // This is the manual trigger needed for input fields in offline mode
+                    // 1. Update local data structure manually
+                    const dateKey = getDateKey(selectedDate);
+                    const habitId = input.dataset.id;
+                    const value = input.value;
+
+                    habitData[dateKey] = habitData[dateKey] || {};
+                    habitData[dateKey][habitId] = value;
+                    
+                    // 2. Refresh everything
                     saveAndRefresh(input);
-                    // Force the Averages and Challenge UI to update immediately after number input change
-                    updateAverages(); 
-                    renderActiveChallengeUI(); 
                  }
             });
 
