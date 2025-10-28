@@ -13,10 +13,31 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // IMPORTANT: We use window scope for global access in the main script block
-        window.firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // --- FINAL DEPLOYMENT CONFIGURATION ---
+        
+        // This special string 'VITE_FIREBASE_CONFIG' will be replaced by Netlify during deployment
+        // with the value you set in your environment variables.
+        const netlifyConfigString = 'VITE_FIREBASE_CONFIG'; 
+        const geminiConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+
+        let configToParse = null;
+
+        if (netlifyConfigString.startsWith('{')) {
+            // This will run if Netlify successfully injected the config
+            configToParse = netlifyConfigString;
+            window.initialAuthToken = null; // Use anonymous sign-in for Netlify
+        } else if (geminiConfigString) {
+            // This will run in the Gemini environment
+            configToParse = geminiConfigString;
+            window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        } else {
+            // This will run on GitHub Pages (Offline Mode)
+            configToParse = '{}';
+            window.initialAuthToken = null;
+        }
+
+        window.firebaseConfig = JSON.parse(configToParse);
+        window.appId = window.firebaseConfig.appId || (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id');
         
         // --- RESILIENT INITIALIZATION ---
         try {
@@ -30,8 +51,8 @@
                     getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, doc, setDoc, onSnapshot, collection, query, writeBatch, deleteDoc, getDocs, getDoc, updateDoc, deleteField
                 };
             } else {
-                // If config is missing (as on GitHub Pages), prevent app crash
-                console.warn("FIREBASE CONFIGURATION MISSING (Expected on GitHub Pages). App will run in Offline/Display Mode.");
+                // If config is missing, prevent app crash
+                console.warn("FIREBASE CONFIGURATION MISSING. App will run in Offline/Display Mode.");
                 window.app = null;
                 window.db = null;
                 window.auth = null;
@@ -1636,10 +1657,9 @@
             document.addEventListener('click', (event) => {
                 const setupPanel = document.getElementById('setup-input-container').parentNode; // The entire Habit Setup panel div
                 const isClickInsideSetupPanel = setupPanel.contains(event.target);
-                const isInput = event.target === newHabitNameInput || event.target === newHabitTypeSelect || event.target === addHabitBtn;
 
-                if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel && !isInput) {
-                    // Wait a moment before checking if the input is empty to avoid race conditions
+                if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel) {
+                    // Check if the input is empty before collapsing
                     setTimeout(() => {
                         if (newHabitNameInput.value.trim() === '') {
                             setupInputContainer.classList.remove('active');
@@ -1789,3 +1809,4 @@
     </script>
 </body>
 </html>
+
