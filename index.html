@@ -1047,7 +1047,7 @@
                 participants: { [userId || 'default']: { progress: 0, lastUpdated: new Date().toISOString() } } // Ensure current user is in participants
             };
 
-            // --- OFFLINE MODE: Bypass database save, use session storage ---
+            // --- OFFLINE MODE: Bypass database save, use session storage and force initial progress update ---
             if (!window.auth) {
                  activeChallenge = challengeData;
                  
@@ -1059,6 +1059,9 @@
                            'MOCK002': { progress: 0, lastUpdated: new Date().toISOString() },
                       };
                  }
+
+                 // Force initial progress calculation right here
+                 updateChallengeProgress(activeChallenge); 
                  
                  sessionStorage.setItem(OFFLINE_CHALLENGE_KEY, JSON.stringify(activeChallenge));
                  renderActiveChallengeUI(); // Render immediately to display challenge
@@ -1621,7 +1624,8 @@
             });
 
             // Focus Listeners for collapsing Habit Setup Input (FINAL FIX)
-            habitSetupHeader.addEventListener('click', () => {
+            habitSetupHeader.addEventListener('click', (event) => {
+                 // The toggle behavior is attached to the header click
                  setupInputContainer.classList.toggle('active');
                  // Ensure the cursor is placed in the input if opening
                  if (setupInputContainer.classList.contains('active')) {
@@ -1632,8 +1636,9 @@
             document.addEventListener('click', (event) => {
                 const setupPanel = document.getElementById('setup-input-container').parentNode; // The entire Habit Setup panel div
                 const isClickInsideSetupPanel = setupPanel.contains(event.target);
+                const isInput = event.target === newHabitNameInput || event.target === newHabitTypeSelect || event.target === addHabitBtn;
 
-                if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel) {
+                if (setupInputContainer.classList.contains('active') && !isClickInsideSetupPanel && !isInput) {
                     // Wait a moment before checking if the input is empty to avoid race conditions
                     setTimeout(() => {
                         if (newHabitNameInput.value.trim() === '') {
